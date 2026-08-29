@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sign in with GoodWe",
+        "description": "Use the same email and password you use in the GoodWe app. Your charger is found automatically \u2014 there is no serial number to look up.",
+        "data": { "username": "Email", "password": "Password" }
+      },
+      "charger": {
+        "title": "Which charger?",
+        "description": "This account has more than one. Choose the one you want in Home Assistant.",
+        "data": { "serial": "Charger" }
+      }
+    },
+    "error": {
+      "invalid_auth": "That GoodWe email and password were not accepted. Check them in the GoodWe app and try again.",
+      "no_chargers": "Signed in successfully, but no EV charger is listed on this account. Check the charger appears in your GoodWe app."
+    },
+    "abort": { "already_configured": "That charger is already set up." }
+  }
+}
