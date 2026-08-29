@@ -61,6 +61,32 @@ Assistant too. **That one is built in** — no HACS: enable Modbus TCP on the
 inverter through the SolarGo app, then add **GoodWe Inverter** from
 Settings → Devices & services.
 
+## Tests
+
+```
+run-tests.cmd        (Windows)
+./run-tests.sh       (macOS / Linux)
+```
+
+First run creates a `.venv` and installs Home Assistant, which takes a few
+minutes; after that it is seconds. Twelve checks: every module imports against a
+real Home Assistant, the manifest is one HACS will accept, the charge modes
+round-trip, the setup flow's two failures stay distinguishable and translated,
+the poll floor holds, and no secret is committed.
+
+The charge-mode check is the one that earns its keep. Labels are what the
+customer sees; numbers are what the charger takes. Send a display name where a
+number belongs and nothing errors — the automation reports success while the car
+charges in the wrong mode.
+
+**Read the Home Assistant version the suite prints.** pip installs the newest
+Home Assistant your Python supports, so Python 3.11 gets 2024.3.3 while 3.13
+gets a current one. On an old interpreter the import check proves the
+integration loads against a two-year-old Home Assistant, not against the one
+you are running. Install a newer Python if you want that gap closed.
+
+Nothing here talks to a real charger, and nothing here can.
+
 ## Credits
 
 The SEMS client here is the one from the Sunlands bridge, written against a
