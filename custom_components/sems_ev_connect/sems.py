@@ -109,6 +109,10 @@ def encode_password(password: str) -> str:
     return base64.b64encode(hashlib.md5(password.encode()).hexdigest().encode()).decode()
 
 
+class SemsAuthenticationError(PermissionError):
+    """The SEMS account credentials or session were rejected."""
+
+
 class SemsLink:
     """Async client for a first-generation GoodWe HCA through the SEMS-Plus API."""
 
@@ -234,7 +238,7 @@ class SemsLink:
     async def _login(self) -> None:
         try:
             if not self.username or not self.password:
-                raise ValueError("SEMS account email and password are required")
+                raise SemsAuthenticationError("SEMS account email and password are required")
             session = await self._client()
             body = {
                 "account": self.username,
@@ -249,15 +253,17 @@ class SemsLink:
                 json=body,
                 timeout=aiohttp.ClientTimeout(total=READ_TIMEOUT),
             ) as response:
+                if response.status in (401, 403):
+                    raise SemsAuthenticationError("SEMS sign-in was not accepted")
                 if response.status >= 400:
                     raise ConnectionError(f"SEMS sign-in returned HTTP {response.status}")
                 payload = await response.json(content_type=None)
             code = payload.get("code")
             if payload.get("hasError") or code not in (0, "0", "00000", None):
-                raise PermissionError(payload.get("msg") or "SEMS sign-in was not accepted")
+                raise SemsAuthenticationError("SEMS sign-in was not accepted")
             token = payload.get("data")
             if not isinstance(token, dict) or not token.get("token"):
-                raise PermissionError("SEMS sign-in did not return an access token")
+                raise SemsAuthenticationError("SEMS sign-in did not return an access token")
             self._token = token
             api = str(token.get("api") or "").rstrip("/")
             if api:
@@ -311,6 +317,8 @@ class SemsLink:
                         # (5xx) — fall through to the next candidate gateway.
                         last_error = f"{url} returned HTTP {response.status}"
                         continue
+                    if response.status in (401, 403):
+                        raise SemsAuthenticationError("SEMS session was not accepted")
                     if response.status >= 400:
                         raise ConnectionError(f"SEMS returned HTTP {response.status}")
                     payload = await response.json(content_type=None)
@@ -340,9 +348,24 @@ class SemsLink:
 
     # ------------------------------------------------------------------ discovery
     async def _ensure_plant_id(self, required: bool = False) -> str:
-        """Resolve the SEMS plantId (single-plant accounts only, per reference)."""
+        """Resolve the SEMS plantId for this charger."""
         if self._plant_id:
             return self._plant_id
+
+        # centralized/page ties each charger to its station. This is the only
+        # safe automatic answer on an account with more than one plant.
+        try:
+            for charger in await self.list_chargers():
+                if charger["serial"] == self.wallbox_serial and charger.get("plant_id"):
+                    self._plant_id = charger["plant_id"]
+                    return self._plant_id
+        except SemsAuthenticationError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.debug("SEMS charger-to-plant lookup failed: %s", exc)
+
+        # Older/fallback response shapes may not attach a plant to the charger.
+        # A single plant is still unambiguous, so retain that fallback.
         try:
             payload = await self._post(PATH_STATIONS_PAGE, {"current": 1, "size": 50})
             data = payload.get("data") or {}
@@ -361,7 +384,12 @@ class SemsLink:
             if len(ids) == 1:
                 self._plant_id = ids[0]
             elif len(ids) > 1:
-                log.warning("SEMS account has %d plants; cannot auto-detect plantId", len(ids))
+                log.warning(
+                    "SEMS account has %d plants and the selected charger's plant was not identified",
+                    len(ids),
+                )
+        except SemsAuthenticationError:
+            raise
         except Exception as exc:  # noqa: BLE001
             log.debug("SEMS plantId auto-detect failed: %s", exc)
         if required and not self._plant_id:
@@ -400,13 +428,21 @@ class SemsLink:
                         continue
                     model = _pick(row, "productModel", "deviceModel", "model", "deviceType")
                     name = _pick(row, "deviceName", "name", "alias", "stationName")
+                    plant_id = (
+                        _pick(row, "stationId", "plantId", "powerStationId")
+                        or _pick(group, "stationId", "plantId", "powerStationId", "id")
+                    )
                     found.append({
                         "serial": str(sn),
                         "model": str(model or ""),
                         "name": str(name or ""),
+                        "plant_id": str(plant_id or ""),
                     })
+        except SemsAuthenticationError:
+            raise
         except Exception as exc:  # noqa: BLE001
             log.debug("charger enumeration unavailable: %s", exc)
+            raise
         seen: set[str] = set()
         unique: list[dict[str, str]] = []
         for row in found:
@@ -442,8 +478,11 @@ class SemsLink:
             out["plants"] = names[:10]
             out["plant_count"] = len(names)
             out["chargers"] = await self.list_chargers()
+        except SemsAuthenticationError:
+            raise
         except Exception as exc:  # noqa: BLE001
             log.debug("account probe could not list plants: %s", exc)
+            raise
         return out
 
     async def _command_payload(self) -> dict[str, Any]:
@@ -509,6 +548,8 @@ class SemsLink:
             response = await self._get(
                 PATH_LAST_CHARGE, {"chargeSn": self.wallbox_serial, "pwId": plant}
             )
+        except SemsAuthenticationError:
+            raise
         except Exception as exc:  # noqa: BLE001
             log.debug("SEMS getLastCharge failed: %s", exc)
             return {}
@@ -635,6 +676,8 @@ class SemsLink:
             snap.mode_name = R.CHARGE_MODES.get(mode, "Fast")
             snap.comms = 1
             snap.faults = faults
+        except SemsAuthenticationError:
+            raise
         except Exception as exc:  # noqa: BLE001
             snap.error = str(exc)
             log.warning("SEMS charger update failed: %s", exc)
@@ -690,6 +733,8 @@ class SemsLink:
                 await asyncio.sleep(self.verify_wait if matched == 0 else self.verify_poll)
                 try:
                     data = await self._read_state()
+                except SemsAuthenticationError:
+                    raise
                 except Exception as exc:  # noqa: BLE001
                     log.debug("verification re-read failed (%s), still polling", exc)
                     data = None

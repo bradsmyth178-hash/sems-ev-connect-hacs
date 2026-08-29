@@ -6,12 +6,13 @@ from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
 from .models import Snapshot
-from .sems import SemsLink
+from .sems import SemsAuthenticationError, SemsLink
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +39,8 @@ class SemsCoordinator(DataUpdateCoordinator[Snapshot]):
     async def _async_update_data(self) -> Snapshot:
         try:
             snap = await self.link.snapshot()
+        except SemsAuthenticationError as err:
+            raise ConfigEntryAuthFailed("SEMS Portal sign-in was not accepted") from err
         except Exception as err:  # noqa: BLE001 - surfaced to HA as unavailable
             raise UpdateFailed(f"could not reach the charger through GoodWe: {err}") from err
         if not snap.ok:
@@ -68,7 +71,8 @@ class SemsCoordinator(DataUpdateCoordinator[Snapshot]):
 
 
 async def build_link(hass: HomeAssistant, username: str, password: str,
-                     serial: str, charger_kw: float = 7.0) -> SemsLink:
+                     serial: str, charger_kw: float = 7.0,
+                     plant_id: str = "") -> SemsLink:
     """A SEMS client sharing Home Assistant's own HTTP session."""
     return SemsLink(
         username,
@@ -76,5 +80,6 @@ async def build_link(hass: HomeAssistant, username: str, password: str,
         serial,
         charger_kw=charger_kw,
         phases=1,
+        plant_id=plant_id,
         session=async_get_clientsession(hass),
     )

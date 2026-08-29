@@ -33,15 +33,10 @@ SENSORS: tuple[SemsSensorDescription, ...] = (
     ),
     SemsSensorDescription(
         key="vehicle",
-        # "Vehicle state" is what the shipped automations tell people to pick,
-        # because that is what the community integration calls it. A different
-        # name here is an instruction that matches nothing.
         name="Vehicle state",
         translation_key="vehicle_state",
         device_class=SensorDeviceClass.ENUM,
         options=list(CAR_KEYS.values()),
-        # The key, not the words: a template comparing states reads the raw
-        # state, and the words are rendered over it from the translations.
         value=lambda s: CAR_KEYS.get(s.car),
     ),
     SemsSensorDescription(
@@ -65,18 +60,10 @@ SENSORS: tuple[SemsSensorDescription, ...] = (
         name="Session energy",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        # This resets to zero when a new session starts, so it is not TOTAL and
-        # must not be fed to the energy dashboard as one.
-        state_class=SensorStateClass.MEASUREMENT,
+        # This resets to zero at the next session. ENERGY does not permit the
+        # MEASUREMENT state class in Home Assistant, and marking it as TOTAL
+        # would incorrectly make it eligible for the Energy dashboard.
         value=lambda s: round(s.session_kwh, 2),
-    ),
-    SemsSensorDescription(
-        key="lifetime_energy",
-        name="Total energy",
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        value=lambda s: round(s.lifetime_kwh, 2),
     ),
     SemsSensorDescription(
         key="max_power",

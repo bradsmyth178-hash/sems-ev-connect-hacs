@@ -15,14 +15,54 @@
         "data": {
           "serial": "Charger"
         }
+      },
+      "reauth_confirm": {
+        "title": "Sign in to SEMS Portal again",
+        "description": "Enter the current password for {username}.",
+        "data": {
+          "password": "Password"
+        }
       }
     },
     "error": {
       "invalid_auth": "That email and password were not accepted. They are your SEMS Portal details — check they work in the SEMS Portal app and try again.",
+      "cannot_connect": "SEMS Portal could not be reached. Check the internet connection and try again.",
       "no_chargers": "Signed in successfully, but no EV charger is listed on this account. Check the charger appears in your SEMS Portal app."
     },
     "abort": {
-      "already_configured": "That charger is already set up."
+      "already_configured": "That charger is already set up.",
+      "reauth_successful": "SEMS Portal sign-in updated.",
+      "reauth_entry_missing": "The existing SEMS EV CONNECT setup could not be found."
+    }
+  },
+  "entity": {
+    "select": {
+      "charge_mode": {
+        "name": "Charge mode",
+        "state": {
+          "fast": "Fast",
+          "pv_priority": "Solar only",
+          "pv_and_battery": "Solar + battery"
+        }
+      }
+    },
+    "sensor": {
+      "vehicle_state": {
+        "name": "Vehicle state",
+        "state": {
+          "not_plugged_in": "Not plugged in",
+          "half_connected": "Half connected",
+          "connected": "Connected"
+        }
+      },
+      "charge_mode": {
+        "name": "Charge mode",
+        "state": {
+          "fast": "Fast",
+          "pv_priority": "Solar only",
+          "pv_and_battery": "Solar + battery"
+        }
+      }
     }
   },
   "entity": {

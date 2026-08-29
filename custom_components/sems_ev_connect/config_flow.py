@@ -8,22 +8,24 @@ knows which chargers it has, so it is asked instead.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow
+from homeassistant.config_entries import ConfigEntry, ConfigFlow
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_MODEL, CONF_SERIAL, DOMAIN
-from .sems import SemsLink
+from .const import CONF_PLANT_ID, CONF_SERIAL, DOMAIN
+from .sems import SemsAuthenticationError, SemsLink
 
 _LOGGER = logging.getLogger(__name__)
 
 CREDENTIALS_SCHEMA = vol.Schema(
     {vol.Required(CONF_USERNAME): str, vol.Required(CONF_PASSWORD): str}
 )
+REAUTH_SCHEMA = vol.Schema({vol.Required(CONF_PASSWORD): str})
 
 
 class SemsEvConnectConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -35,6 +37,7 @@ class SemsEvConnectConfigFlow(ConfigFlow, domain=DOMAIN):
         self._username: str = ""
         self._password: str = ""
         self._chargers: list[dict[str, str]] = []
+        self._reauth_entry: ConfigEntry | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -52,11 +55,14 @@ class SemsEvConnectConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             try:
                 probe = await link.account_probe()
-            except Exception as err:  # noqa: BLE001
+            except SemsAuthenticationError as err:
                 # Sign-in failed and "no charger on the account" are different
                 # problems with different fixes, so they get different errors.
                 _LOGGER.debug("GoodWe sign-in failed: %s", err)
                 errors["base"] = "invalid_auth"
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("SEMS Portal could not be reached: %s", err)
+                errors["base"] = "cannot_connect"
             else:
                 self._chargers = probe.get("chargers") or []
                 if not self._chargers:
@@ -84,7 +90,7 @@ class SemsEvConnectConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self._create_async(chosen)
 
         options = {
-            c["serial"]: " - ".join(p for p in (c.get("name"), c.get("model"), c["serial"]) if p)
+            c["serial"]: " - ".join(p for p in (c.get("name"), c["serial"]) if p)
             for c in self._chargers
         }
         return self.async_show_form(
@@ -99,15 +105,57 @@ class SemsEvConnectConfigFlow(ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(serial)
         self._abort_if_unique_id_configured()
         return self.async_create_entry(
-            title=charger.get("name") or charger.get("model") or f"Charger {serial}",
+            title=charger.get("name") or f"Charger {serial}",
             data={
                 CONF_USERNAME: self._username,
                 CONF_PASSWORD: self._password,
                 CONF_SERIAL: serial,
-                CONF_MODEL: charger.get("model") or "",
+                CONF_PLANT_ID: charger.get("plant_id") or "",
             },
         )
 
-    async def async_step_reauth(self, entry_data: dict[str, Any]):
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]):
         """Offered when the stored password stops being accepted."""
-        return await self.async_step_user()
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context["entry_id"]
+        )
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ):
+        """Check a replacement password and update the existing entry."""
+        errors: dict[str, str] = {}
+        entry = self._reauth_entry
+        if entry is None:
+            return self.async_abort(reason="reauth_entry_missing")
+
+        if user_input is not None:
+            password = user_input[CONF_PASSWORD]
+            link = SemsLink(
+                entry.data[CONF_USERNAME],
+                password,
+                entry.data[CONF_SERIAL],
+                plant_id=entry.data.get(CONF_PLANT_ID, ""),
+                session=async_get_clientsession(self.hass),
+            )
+            try:
+                await link.account_probe()
+            except SemsAuthenticationError as err:
+                _LOGGER.debug("SEMS reauthentication was rejected: %s", err)
+                errors["base"] = "invalid_auth"
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("SEMS Portal could not be reached during reauthentication: %s", err)
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data={**entry.data, CONF_PASSWORD: password},
+                )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=REAUTH_SCHEMA,
+            errors=errors,
+            description_placeholders={"username": entry.data[CONF_USERNAME]},
+        )
