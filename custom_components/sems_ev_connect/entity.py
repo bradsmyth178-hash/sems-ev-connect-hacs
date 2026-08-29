@@ -4,7 +4,7 @@ from __future__ import annotations
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_MODEL, CONF_SERIAL, DOMAIN
+from .const import CONF_SERIAL, DOMAIN
 from .coordinator import SemsCoordinator
 
 
@@ -22,7 +22,6 @@ class SemsEntity(CoordinatorEntity[SemsCoordinator]):
             identifiers={(DOMAIN, serial)},
             name=coordinator.entry.title,
             manufacturer="GoodWe",
-            model=coordinator.entry.data.get(CONF_MODEL) or "HCA EV charger",
             serial_number=serial,
         )
 

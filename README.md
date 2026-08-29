@@ -31,8 +31,8 @@ choose from a list.
 | **Charging** | switch — start and stop |
 | **Charge mode** | select — Fast, Solar only, Solar + battery |
 | **Maximum charge power** | number — bounded by what the charger can actually do |
-| **Status**, **Vehicle** | what the charger and the car are doing |
-| **Charging power**, **Session energy**, **Total energy** | live readings |
+| **Status**, **Vehicle state** | what the charger and the car are doing |
+| **Charging power**, **Session energy** | live readings |
 | **Power limit**, **Fault** | diagnostics |
 
 ## Notes worth knowing
@@ -41,18 +41,19 @@ choose from a list.
 API your phone app uses; polling harder does not get fresher data and risks the
 account being rate-limited, which locks you out of your own charger.
 
-**Charge modes are sent as machine values, not labels.** Home Assistant's own
-GoodWe wording differs from ours ("PV priority" versus "Solar only"). This
-integration shows the friendlier words and sends the value the charger expects,
-so automations cannot fail silently by passing a display name.
+**Charge modes use stable automation values.** Automations use `fast`,
+`pv_priority` and `pv_and_battery`; Home Assistant displays those as Fast,
+Solar only and Solar + battery. The stable values are validated before a
+command reaches the integration, so a wording change cannot break a schedule.
 
 **Writes are verified.** A change the charger quietly ignores is re-asserted, and
 a change that will not stick raises rather than reporting success — the charger
 having a different idea of its own mode than Home Assistant does is worse than an
 error.
 
-**Session energy resets each session.** It is deliberately not marked as a total,
-so it will not corrupt the Energy dashboard. Use **Total energy** for that.
+**Session energy resets each session.** It is deliberately not marked as a
+total, and the integration does not invent a lifetime total that would reset
+when Home Assistant restarts.
 
 ## Your solar inverter is separate
 
@@ -69,15 +70,13 @@ run-tests.cmd        (Windows)
 ```
 
 First run creates a `.venv` and installs Home Assistant, which takes a few
-minutes; after that it is seconds. Twelve checks: every module imports against a
-real Home Assistant, the manifest is one HACS will accept, the charge modes
-round-trip, the setup flow's two failures stay distinguishable and translated,
-the poll floor holds, and no secret is committed.
+minutes; after that it is seconds. Fifteen checks cover module loading, the HACS
+manifest, translated machine states, Home Assistant's select validation, sensor
+metadata, power bounds, authentication and reauthentication, multi-plant
+routing, setup error messages, the poll floor and secret scanning.
 
-The charge-mode check is the one that earns its keep. Labels are what the
-customer sees; numbers are what the charger takes. Send a display name where a
-number belongs and nothing errors — the automation reports success while the car
-charges in the wrong mode.
+The charge-mode check exercises Home Assistant's validation before the handler,
+then proves the accepted machine key becomes the correct numeric SEMS command.
 
 **Read the Home Assistant version the suite prints.** pip installs the newest
 Home Assistant your Python supports, so Python 3.11 gets 2024.3.3 while 3.13
