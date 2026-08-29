@@ -61,30 +61,78 @@ def check_manifest() -> None:
 
 # ---------------------------------------------------------------- charge modes
 def check_mode_round_trip() -> None:
+    import io
+    import json
+
     from custom_components.sems_ev_connect.const import (
-        LABEL_TO_MODE, MODE_FAST, MODE_LABELS, MODE_SOLAR_BATTERY, MODE_SOLAR_ONLY)
+        CAR_KEYS, KEY_TO_MODE, MODE_FAST, MODE_KEYS, MODE_LABELS,
+        MODE_SOLAR_BATTERY, MODE_SOLAR_ONLY)
 
-    # Every label maps to a number, and back to the same label.
-    for label, mode in LABEL_TO_MODE.items():
-        assert isinstance(mode, int), f"{label} must map to a number, not {mode!r}"
-        assert MODE_LABELS[mode] == label, f"{label} does not round-trip"
+    # The contract. Not a preference: these are the option values the community
+    # integration prezervos/goodwe-wallbox-sems-home-assistant exposes, and the
+    # automations we ship send them. Home Assistant matches an option literally
+    # and refuses anything else in core, before our code runs - so if these
+    # drift, every shipped automation dies with ServiceValidationError.
+    assert MODE_KEYS[MODE_FAST] == "fast"
+    assert MODE_KEYS[MODE_SOLAR_ONLY] == "pv_priority"
+    assert MODE_KEYS[MODE_SOLAR_BATTERY] == "pv_and_battery"
+    assert CAR_KEYS[0] == "not_plugged_in", "the car-connected test in every blueprint reads this"
 
-    assert LABEL_TO_MODE["Fast"] == MODE_FAST == 0
-    assert LABEL_TO_MODE["Solar only"] == MODE_SOLAR_ONLY == 1
-    assert LABEL_TO_MODE["Solar + battery"] == MODE_SOLAR_BATTERY == 2
+    for key, mode in KEY_TO_MODE.items():
+        assert isinstance(mode, int), f"{key} must map to a number, not {mode!r}"
+        assert MODE_KEYS[mode] == key, f"{key} does not round-trip"
 
-    # The wording the customer sees, everywhere. Home Assistant's own GoodWe
-    # integration says "PV priority"; ours must not, or two pages disagree.
-    for stale in ("PV priority", "PV + battery", "PV & battery"):
-        assert stale not in MODE_LABELS.values(), f"{stale} leaked into the customer-facing labels"
-
-    # The select offers exactly these, in this order. Asserted on an instance,
-    # because that is what Home Assistant reads - SelectEntity exposes options
-    # through a property, so the class attribute is not the live value.
+    # The select must offer the keys, never the words. Asserted on an instance,
+    # because Home Assistant reads options through a property.
     from custom_components.sems_ev_connect.select import SemsModeSelect
     inst = SemsModeSelect.__new__(SemsModeSelect)
-    assert inst.options == list(MODE_LABELS.values()), inst.options
-    ok("charge modes round-trip: labels shown, numbers sent, no stale wording")
+    assert inst.options == ["fast", "pv_priority", "pv_and_battery"], inst.options
+    for label in MODE_LABELS.values():
+        assert label not in inst.options, f"{label!r} is a display word, not an option"
+
+    # ...and the words the customer reads must survive the move into
+    # translations, or the setup page and the dropdown stop agreeing.
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for name in ("custom_components/sems_ev_connect/translations/en.json",
+                 "custom_components/sems_ev_connect/strings.json"):
+        d = json.load(io.open(os.path.join(here, name), encoding="utf-8"))
+        shown = d["entity"]["select"]["charge_mode"]["state"]
+        assert shown == {"fast": "Fast", "pv_priority": "Solar only",
+                         "pv_and_battery": "Solar + battery"}, (name, shown)
+        car = d["entity"]["sensor"]["vehicle_state"]["state"]
+        assert car["not_plugged_in"] == "Not plugged in", (name, car)
+        for stale in ("PV priority", "PV + battery", "PV & battery"):
+            assert stale not in shown.values(), f"{stale} leaked into what the customer reads"
+
+    ok("charge modes round-trip: automations' keys sent, customer's words shown")
+
+
+def check_vehicle_sensor_matches_the_automations() -> None:
+    """The car-connected gate in every blueprint is a string comparison.
+
+    It reads the raw state, lowercased, against a list of underscore tokens. A
+    sensor that reports "Not plugged in" is not in that list, so the gate reads
+    "a car is connected" whatever is actually plugged in - and the name the
+    blueprints tell people to pick has to exist, too.
+    """
+    from custom_components.sems_ev_connect.const import CAR_KEYS
+    from custom_components.sems_ev_connect.sensor import SENSORS
+
+    by_key = {d.key: d for d in SENSORS}
+    vehicle = by_key["vehicle"]
+    assert vehicle.name == "Vehicle state", vehicle.name
+    assert vehicle.options == ["not_plugged_in", "half_connected", "connected"], vehicle.options
+
+    # Exactly the tokens the blueprints' v_no_car list contains.
+    v_no_car = ["not_plugged_in", "disconnected", "unplugged", "not_connected",
+                "off", "false", "no", "0", "none", "unavailable", "offline"]
+    assert CAR_KEYS[0].lower() in v_no_car, (
+        f"{CAR_KEYS[0]!r} is not in the blueprints' no-car list, so every "
+        "automation would read 'a car is connected' with nothing plugged in")
+    for connected in (CAR_KEYS[1], CAR_KEYS[2]):
+        assert connected.lower() not in v_no_car, connected
+
+    ok("the vehicle sensor answers the question the automations actually ask")
 
 
 def check_select_rejects_unknown_option() -> None:
@@ -115,9 +163,10 @@ def check_sensor_values() -> None:
     values = {d.key: d.value(live) for d in SENSORS}
 
     assert values["status"] == "Charging"
-    assert values["vehicle"] == "Connected"
-    # The API said "PV priority"; the customer must read our wording.
-    assert values["charge_mode"] == "Solar only", values["charge_mode"]
+    # The raw state, not the words: a template comparing states reads this, and
+    # Home Assistant renders "Connected" over it from the translations.
+    assert values["vehicle"] == "connected", values["vehicle"]
+    assert values["charge_mode"] == "pv_priority", values["charge_mode"]
     assert values["power"] == 6.81, "power should be rounded, not raw float noise"
     assert values["session_energy"] == 12.35
     assert values["lifetime_energy"] == 980.5
@@ -271,6 +320,7 @@ def check_no_secrets_committed() -> None:
 def main() -> int:
     for check in (check_every_module_imports, check_manifest, check_mode_round_trip,
                   check_select_rejects_unknown_option, check_sensor_values,
+                  check_vehicle_sensor_matches_the_automations,
                   check_sensors_survive_an_empty_snapshot, check_power_limit_bounds,
                   check_entities_are_uniquely_identified, check_config_flow_error_paths,
                   check_every_error_has_a_message, check_poll_interval_is_not_aggressive,

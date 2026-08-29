@@ -24,5 +24,32 @@
     "abort": {
       "already_configured": "That charger is already set up."
     }
+  },
+  "entity": {
+    "select": {
+      "charge_mode": {
+        "state": {
+          "fast": "Fast",
+          "pv_priority": "Solar only",
+          "pv_and_battery": "Solar + battery"
+        }
+      }
+    },
+    "sensor": {
+      "vehicle_state": {
+        "state": {
+          "not_plugged_in": "Not plugged in",
+          "half_connected": "Half connected",
+          "connected": "Connected"
+        }
+      },
+      "charge_mode": {
+        "state": {
+          "fast": "Fast",
+          "pv_priority": "Solar only",
+          "pv_and_battery": "Solar + battery"
+        }
+      }
+    }
   }
 }

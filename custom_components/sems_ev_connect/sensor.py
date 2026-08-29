@@ -15,7 +15,7 @@ from homeassistant.const import UnitOfEnergy, UnitOfPower
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CAR_LABELS, DOMAIN, MODE_LABELS
+from .const import CAR_KEYS, DOMAIN, MODE_KEYS
 from .entity import SemsEntity
 from .models import Snapshot
 
@@ -33,15 +33,24 @@ SENSORS: tuple[SemsSensorDescription, ...] = (
     ),
     SemsSensorDescription(
         key="vehicle",
-        name="Vehicle",
-        # Plain words rather than the raw code, because this is the one an
-        # automation condition is most often written against by hand.
-        value=lambda s: CAR_LABELS.get(s.car, "Unknown"),
+        # "Vehicle state" is what the shipped automations tell people to pick,
+        # because that is what the community integration calls it. A different
+        # name here is an instruction that matches nothing.
+        name="Vehicle state",
+        translation_key="vehicle_state",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(CAR_KEYS.values()),
+        # The key, not the words: a template comparing states reads the raw
+        # state, and the words are rendered over it from the translations.
+        value=lambda s: CAR_KEYS.get(s.car),
     ),
     SemsSensorDescription(
         key="charge_mode",
         name="Charge mode",
-        value=lambda s: MODE_LABELS.get(s.mode, s.mode_name or None),
+        translation_key="charge_mode",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(MODE_KEYS.values()),
+        value=lambda s: MODE_KEYS.get(s.mode),
     ),
     SemsSensorDescription(
         key="power",
