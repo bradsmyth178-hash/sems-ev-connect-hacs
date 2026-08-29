@@ -5,7 +5,7 @@ Puts a **GoodWe HCA EV charger** into Home Assistant.
 The first-generation HCA charger has no local control protocol — no Modbus, no
 LAN API, no OCPP of its own — so nothing on your home network can reach it. It
 is reachable only through GoodWe's SEMS cloud. This integration signs in with
-your own GoodWe account and gives you the charger as a normal Home Assistant
+your own GoodWe SEMS Portal account and gives you the charger as a normal Home Assistant
 device.
 
 ## Install
@@ -16,7 +16,7 @@ device.
 3. Find **SEMS EV CONNECT** in HACS and press **Download**, then restart
    Home Assistant
 4. **Settings → Devices & services → Add integration → SEMS EV CONNECT**
-5. Enter the email and password you use for the GoodWe app
+5. Enter the email and password you use for the GoodWe **SEMS Portal** app
 
 You are not asked for a serial number. The account already knows which chargers
 it has, so it is asked — reading a serial off a unit in a garage is the fiddliest

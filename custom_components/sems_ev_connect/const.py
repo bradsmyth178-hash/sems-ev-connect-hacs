@@ -8,7 +8,7 @@ DOMAIN: Final = "sems_ev_connect"
 CONF_SERIAL: Final = "serial"
 CONF_MODEL: Final = "model"
 
-# SEMS is a cloud API shared with the GoodWe app. Polling harder than this does
+# SEMS is a cloud API shared with the SEMS Portal app. Polling harder than this does
 # not get fresher data - the bridge learned the same thing the hard way - and it
 # risks the account being rate-limited, which locks the owner out of their own
 # charger. Thirty seconds is the floor the SEMS client itself enforces.
