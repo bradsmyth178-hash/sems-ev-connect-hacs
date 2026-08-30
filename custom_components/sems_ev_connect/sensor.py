@@ -11,7 +11,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy, UnitOfPower
+from homeassistant.const import (
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+    UnitOfEnergy,
+    UnitOfPower,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -30,6 +35,19 @@ SENSORS: tuple[SemsSensorDescription, ...] = (
         key="status",
         name="Status",
         value=lambda s: s.status_name or None,
+    ),
+    SemsSensorDescription(
+        key="evcc_status",
+        name="EVCC status",
+        value=lambda s: {
+            0: "A",  # ready, no vehicle
+            1: "B",  # connected
+            2: "B",  # handshaking
+            3: "C",  # charging
+            4: "B",  # complete, still connected
+            6: "B",  # scheduled start
+            10: "B",  # paused by available energy
+        }.get(s.status),
     ),
     SemsSensorDescription(
         key="vehicle",
@@ -54,6 +72,22 @@ SENSORS: tuple[SemsSensorDescription, ...] = (
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         value=lambda s: round(s.power_kw, 2),
+    ),
+    SemsSensorDescription(
+        key="current",
+        name="Charging current",
+        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
+        value=lambda s: round(s.curr_a, 1),
+    ),
+    SemsSensorDescription(
+        key="voltage",
+        name="Charging voltage",
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        value=lambda s: round(s.volt_a, 1),
     ),
     SemsSensorDescription(
         key="session_energy",

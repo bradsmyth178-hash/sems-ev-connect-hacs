@@ -41,3 +41,11 @@ CAR_KEYS: Final = {
 # own floor - asking for less does not charge slower, it fails. The ceiling is
 # whatever the unit is rated for.
 MIN_CHARGE_KW: Final = 1.4
+
+# EVCC controls single-phase chargers in amperes. The Gen 1 SEMS API only
+# accepts a power limit, so the Home Assistant current entity converts using a
+# nominal 230 V line voltage and keeps the hardware's 6 A floor explicit.
+NOMINAL_LINE_VOLTAGE: Final = 230.0
+MIN_CHARGE_CURRENT_A: Final = 6.0
+POWER_COMMAND_SPACING: Final = 30.0
+FRESH_SNAPSHOT_SECONDS: Final = 120.0

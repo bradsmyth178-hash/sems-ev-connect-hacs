@@ -150,13 +150,17 @@ def check_sensor_values() -> None:
 
     live = Snapshot(ok=True, status=3, status_name="Charging", car=2, power_kw=6.8123,
                     session_kwh=12.3456, lifetime_kwh=980.5, max_power_kw=7.0,
-                    mode=1, mode_name="PV priority", faults=[])
+                    mode=1, mode_name="PV priority", curr_a=29.6, volt_a=231.4,
+                    faults=[])
     values = {d.key: d.value(live) for d in SENSORS}
 
     assert values["status"] == "Charging"
+    assert values["evcc_status"] == "C"
     assert values["vehicle"] == "connected"
     assert values["charge_mode"] == "pv_priority", values["charge_mode"]
     assert values["power"] == 6.81, "power should be rounded, not raw float noise"
+    assert values["current"] == 29.6
+    assert values["voltage"] == 231.4
     assert values["session_energy"] == 12.35
     assert values["fault"] == "None"
 
@@ -180,6 +184,14 @@ def check_sensor_values() -> None:
     should_start = vehicle.value(unplugged).lower() not in no_car_states
     assert should_start is False
     assert vehicle.value(Snapshot(ok=True, car=2)).lower() not in no_car_states
+
+    evcc = next(d for d in SENSORS if d.key == "evcc_status")
+    assert evcc.value(Snapshot(ok=True, status=0)) == "A"
+    for status in (1, 2, 4, 6, 10):
+        assert evcc.value(Snapshot(ok=True, status=status)) == "B"
+    assert evcc.value(Snapshot(ok=True, status=3)) == "C"
+    for unavailable in (5, 7, 8, 9):
+        assert evcc.value(Snapshot(ok=True, status=unavailable)) is None
     ok("sensor states and enum options match the supplied automation safety gate")
 
 
@@ -235,6 +247,120 @@ def check_power_limit_bounds() -> None:
     assert n.native_step == 0.1, n.native_step
     assert n.native_max_value == 7.0, "the ceiling must come from the charger, not a constant"
     ok("the power limit is bounded by what the charger can actually do")
+
+
+def check_evcc_current_contract() -> None:
+    """EVCC writes amperes; SEMS receives one verified power request."""
+    from custom_components.sems_ev_connect.const import MIN_CHARGE_CURRENT_A
+    from custom_components.sems_ev_connect.models import Snapshot
+    from custom_components.sems_ev_connect.number import (
+        SemsCurrentLimit,
+        current_to_power_kw,
+        power_to_current_a,
+    )
+
+    class Link:
+        charger_kw = 7
+
+    class Coord:
+        link = Link()
+        data = Snapshot(ok=True, max_power_kw=7)
+
+    number = SemsCurrentLimit.__new__(SemsCurrentLimit)
+    number.coordinator = Coord()
+    assert number.native_min_value == MIN_CHARGE_CURRENT_A == 6
+    assert number.native_max_value == 30.4
+    assert number.native_value == 30.4
+    assert current_to_power_kw(6, 7) == 1.4
+    assert current_to_power_kw(30.4, 7) == 7.0
+    assert power_to_current_a(1.4) == 6
+    for invalid in (5.9, 30.6):
+        try:
+            current_to_power_kw(invalid, 7)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"accepted unsafe current {invalid} A")
+    ok("EVCC current bounds map 6 A to 1.4 kW and cap the 7 kW charger at 30.4 A")
+
+
+def check_evcc_commands_are_bounded_and_verified() -> None:
+    """Only one future current request waits while a verified write is active."""
+    import asyncio
+    import time
+
+    from homeassistant.exceptions import HomeAssistantError
+    from custom_components.sems_ev_connect.coordinator import SemsCoordinator
+    from custom_components.sems_ev_connect.models import Snapshot
+
+    async def scenario() -> None:
+        class Link:
+            charger_kw = 7
+
+            def __init__(self):
+                self.calls: list[float] = []
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def set_max_power_kw(self, kw: float, unit_kw: float) -> None:
+                self.calls.append(kw)
+                if len(self.calls) == 1:
+                    self.started.set()
+                    await self.release.wait()
+
+        link = Link()
+        coordinator = SemsCoordinator.__new__(SemsCoordinator)
+        coordinator.link = link
+        coordinator.data = Snapshot(ok=True, max_power_kw=7)
+        coordinator._snapshot_at = time.monotonic()
+        coordinator._pending_power = None
+        coordinator._power_worker = None
+        coordinator._last_power_write_at = 0.0
+        coordinator.power_command_spacing = 0.0
+
+        refreshes = 0
+
+        async def refresh() -> None:
+            nonlocal refreshes
+            refreshes += 1
+
+        coordinator.async_request_refresh = refresh
+
+        first = asyncio.create_task(coordinator.async_command("max_power", 3.0))
+        await link.started.wait()
+        assert not first.done(), "a current write returned before verification finished"
+
+        superseded = asyncio.create_task(coordinator.async_command("max_power", 4.0))
+        await asyncio.sleep(0)
+        newest = asyncio.create_task(coordinator.async_command("max_power", 5.0))
+        await asyncio.sleep(0)
+        link.release.set()
+        await first
+        await newest
+        try:
+            await superseded
+        except HomeAssistantError as err:
+            assert "replaced" in str(err)
+        else:
+            raise AssertionError("a superseded current request reported success")
+
+        assert link.calls == [3.0, 5.0], link.calls
+        assert refreshes == 2
+        assert coordinator._pending_power is None
+        assert coordinator._power_worker is None
+
+        coordinator.data = Snapshot(ok=False)
+        coordinator._snapshot_at = 0.0
+        try:
+            await coordinator.async_command("max_power", 6.0)
+        except HomeAssistantError as err:
+            assert "fresh status" in str(err)
+        else:
+            raise AssertionError("an unavailable charger accepted a current command")
+        assert link.calls == [3.0, 5.0]
+
+    asyncio.run(scenario())
+    ok("EVCC current writes are verified, newest-wins bounded, and fail closed when unavailable")
 
 
 def check_entities_are_uniquely_identified() -> None:
@@ -550,6 +676,8 @@ def main() -> int:
                   check_select_service_contract, check_sensor_values,
                   check_sensor_state_classes_are_valid,
                   check_sensors_survive_an_empty_snapshot, check_power_limit_bounds,
+                  check_evcc_current_contract,
+                  check_evcc_commands_are_bounded_and_verified,
                   check_entities_are_uniquely_identified, check_config_flow_error_paths,
                   check_auth_failure_starts_reauthentication,
                   check_multi_plant_charger_routing,
