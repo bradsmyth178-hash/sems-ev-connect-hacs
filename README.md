@@ -1,12 +1,9 @@
 # SEMS EV CONNECT
 
-Puts a **GoodWe HCA EV charger** into Home Assistant.
+Puts your **GoodWe EV charger** into Home Assistant.
 
-The first-generation HCA charger has no local control protocol — no Modbus, no
-LAN API, no OCPP of its own — so nothing on your home network can reach it. It
-is reachable only through GoodWe's SEMS cloud. This integration signs in with
-your own GoodWe SEMS Portal account and gives you the charger as a normal Home Assistant
-device.
+This integration signs in with your own GoodWe SEMS Portal account and gives
+you the charger as a normal Home Assistant device.
 
 ## Install
 
@@ -31,8 +28,9 @@ choose from a list.
 | **Charging** | switch — start and stop |
 | **Charge mode** | select — Fast, Solar only, Solar + battery |
 | **Maximum charge power** | number — bounded by what the charger can actually do |
+| **Maximum charging current** | number — EVCC-compatible 6 A to the charger's rated ceiling |
 | **Status**, **Vehicle state** | what the charger and the car are doing |
-| **Charging power**, **Session energy** | live readings |
+| **Charging power**, **Charging current**, **Charging voltage**, **Session energy** | live readings |
 | **Power limit**, **Fault** | diagnostics |
 
 ## Notes worth knowing
@@ -70,10 +68,11 @@ run-tests.cmd        (Windows)
 ```
 
 First run creates a `.venv` and installs Home Assistant, which takes a few
-minutes; after that it is seconds. Fifteen checks cover module loading, the HACS
+minutes; after that it is seconds. Seventeen checks cover module loading, the HACS
 manifest, translated machine states, Home Assistant's select validation, sensor
-metadata, power bounds, authentication and reauthentication, multi-plant
-routing, setup error messages, the poll floor and secret scanning.
+metadata, power and current bounds, command coalescing, unavailable-state
+blocking, authentication and reauthentication, multi-plant routing, setup error
+messages, the poll floor and secret scanning.
 
 The charge-mode check exercises Home Assistant's validation before the handler,
 then proves the accepted machine key becomes the correct numeric SEMS command.
@@ -85,13 +84,5 @@ integration loads against a two-year-old Home Assistant, not against the one
 you are running. Install a newer Python if you want that gap closed.
 
 Nothing here talks to a real charger, and nothing here can.
-
-## Credits
-
-The SEMS client here is the one from the Sunlands bridge, written against a
-documented API reference and exercised against a hardware simulator. The choice
-of which entities to expose follows the ground already covered by
-[prezervos/goodwe-wallbox-sems-home-assistant](https://github.com/prezervos/goodwe-wallbox-sems-home-assistant)
-(MIT), which is worth a look if you want the local-Modbus path for a G2 charger.
 
 MIT licensed.
